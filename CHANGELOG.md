@@ -451,7 +451,6 @@ Updated custom nodes:
 New weights:
 
 - [Add ViT-L-14-TEXT-detail-improved-hiT-GmP-HF.safetensors to text_encoders](https://huggingface.co/zer0int/CLIP-GmP-ViT-L-14/blob/main/ViT-L-14-TEXT-detail-improved-hiT-GmP-HF.safetensors)
-
 - [Update ComfyUI to latest](https://github.com/comfyanonymous/ComfyUI/compare/4027466...b07258c)
 
 New custom nodes:
@@ -554,7 +553,6 @@ Updated nodes:
 ## 2025-01-27
 
 - Add vit-base-nsfw-detector to nsfw_detector
-
 - [Add ComfyUI_PuLID_Flux_ll](https://github.com/lldacing/ComfyUI_PuLID_Flux_ll)
   - Replacement for the faulty ComfyUI-PuLID-Flux custom node (facexlib is broken)
 - [Switch from comfyui-reactor-node to ComfyUI-ReActor](https://github.com/Gourieff/ComfyUI-ReActor)
@@ -690,6 +688,7 @@ Custom nodes updated:
 - [Add hunyuan_video_720_fp8_e4m3fn.safetensors to diffusion_models](https://huggingface.co/Kijai/HunyuanVideo_comfy)
 
 ## 2024-11-28
+
 - [Add flux1-schnell-fp8-e4m3fn.safetensors to diffusion_models](https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-schnell-fp8-e4m3fn.safetensors?download=true)
 
 More flux-dev weights:
@@ -830,7 +829,6 @@ New SD3.5L weights:
 - [Add sd3.5_large_fp8_scaled.safetensors to checkpoints](https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8)
 - Add sd3.5_large.safetensors to checkpoints
 - Add sd3.5_large_turbo.safetensors to checkpoints
-
 - [Upgrade ComfyUI to latest](https://github.com/comfyanonymous/ComfyUI/compare/3a0eeee32053f6c45c5ad4b3975f4ee229b01fbb...915fdb57454c094391d830cefb4ffdd24ed8088c)
 
 Update custom nodes:
@@ -1008,7 +1006,6 @@ Update custom nodes:
   - flux1-dev.safetensors
   - flux1-schnell.safetensors
   - ae.safetensors
-
 - [Update ComfyUI to latest](https://github.com/comfyanonymous/ComfyUI/compare/374e093e09c94b528d7c9dfc337c65cc5c433ee3..8115d8cce97a3edaaad8b08b45ab37c6782e1cb4)
 - [Updated ComfyUI-BrushNet](https://github.com/nullquant/ComfyUI-BrushNet/compare/dbd64b4...a510eff)
 - [Updated ComfyUI-Kolors-MZ](https://github.com/MinusZoneAI/ComfyUI-Kolors-MZ/compare/755a8b4...8688054)
@@ -1060,8 +1057,8 @@ BrushNet weights:
   - inpaint_v26.fooocus.patch
   - MAT_Places512_G_fp16.safetensors
   - Places_512_FullData_G.pth
-
 - [Add PhotoMaker v2 (photomaker-v2.bin
+
 )](https://huggingface.co/TencentARC/PhotoMaker-V2)
 
 ## 2024-07-22
@@ -1547,6 +1544,7 @@ New embeddings:
 
 - Update ComfyUI [to latest (6c6a392)](https://github.com/comfyanonymous/ComfyUI/commit/6c6a39251fe313c56a88c90d820009073b623dfe)
 - Update to latest [IPAdapter Plus (
+
 1ac1cae)](https://github.com/cubiq/ComfyUI_IPAdapter_plus) (breaking changes, custom nodes re-written)
 
 ## 2024-03-20

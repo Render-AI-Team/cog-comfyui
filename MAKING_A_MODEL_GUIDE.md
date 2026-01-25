@@ -7,7 +7,6 @@ If you haven’t used `cog` before or pushed a Replicate model, these are good s
 - https://cog.run/getting-started-own-model
 - https://replicate.com/docs/guides/push-a-model
 
-
 ## Create a new repo from the template
 
 Use https://github.com/replicate/cog-comfyui as a template to create a new repository

@@ -85,16 +85,23 @@ class ComfyUI:
             if callable(method):
                 method(*args, **kwargs)
 
-    def handle_weights(self, workflow, weights_to_download=None):
+    def handle_weights(self, workflow, weights_to_download=None, skip_check=False):
         if weights_to_download is None:
             weights_to_download = []
 
         print("Checking weights")
+
+        # Always normalize LoraLoader URL nodes so they still function when skipping checks
+        self.convert_lora_loader_nodes(workflow)
+
+        if skip_check:
+            print("⚠️  Weight checking is disabled - assuming all models are already available")
+            print("=====================================")
+            return
+            
         embeddings = self.weights_downloader.get_weights_by_type("EMBEDDINGS")
         embedding_to_fullname = {emb.split(".")[0]: emb for emb in embeddings}
         weights_filetypes = self.weights_downloader.supported_filetypes
-
-        self.convert_lora_loader_nodes(workflow)
 
         for node in workflow.values():
             # Skip HFHubLoraLoader and LoraLoaderFromURL nodes since they handle their own weights
@@ -289,7 +296,7 @@ class ComfyUI:
             else:
                 continue
 
-    def load_workflow(self, workflow):
+    def load_workflow(self, workflow, skip_weight_check=False, skip_node_checks=False):
         if not isinstance(workflow, dict):
             wf = json.loads(workflow)
         else:
@@ -302,9 +309,10 @@ class ComfyUI:
                 "You need to use the API JSON version of a ComfyUI workflow. To do this go to your ComfyUI settings and turn on 'Enable Dev mode Options'. Then you can save your ComfyUI workflow via the 'Save (API Format)' button."
             )
 
-        self.handle_known_unsupported_nodes(wf)
+        if not skip_node_checks:
+            self.handle_known_unsupported_nodes(wf)
         self.handle_inputs(wf)
-        self.handle_weights(wf)
+        self.handle_weights(wf, skip_check=skip_weight_check)
         return wf
 
     def reset_execution_cache(self):

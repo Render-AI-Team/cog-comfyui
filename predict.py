@@ -3,8 +3,9 @@ import shutil
 import tarfile
 import zipfile
 import mimetypes
+import json
 from PIL import Image
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from cog import BasePredictor, Input, Path
 from comfyui import ComfyUI
 from weights_downloader import WeightsDownloader
@@ -76,7 +77,8 @@ class Predictor(BasePredictor):
                                     f"Skipping {file} because it already exists in {destination}"
                                 )
 
-    def handle_input_file(self, input_file: Path):
+    def handle_input_file(self, input_file: Path, custom_filename: str = None):
+        """Handle a single input file with optional custom filename"""
         file_extension = self.get_file_extension(input_file)
 
         if file_extension == ".tar":
@@ -86,14 +88,27 @@ class Predictor(BasePredictor):
             with zipfile.ZipFile(input_file, "r") as zip_ref:
                 zip_ref.extractall(INPUT_DIR)
         elif file_extension in IMAGE_TYPES + VIDEO_TYPES:
-            shutil.copy(input_file, os.path.join(INPUT_DIR, f"input{file_extension}"))
+            if custom_filename:
+                filename = custom_filename if custom_filename.endswith(file_extension) else f"{custom_filename}{file_extension}"
+            else:
+                filename = f"input{file_extension}"
+            shutil.copy(input_file, os.path.join(INPUT_DIR, filename))
         else:
             raise ValueError(f"Unsupported file type: {file_extension}")
 
         print("====================================")
         print(f"Inputs uploaded to {INPUT_DIR}:")
         self.comfyUI.get_files(INPUT_DIR)
-        print("====================================")
+        print("=====================================")
+
+    def handle_multiple_input_files(self, input_files: Dict[str, Path]):
+        """Handle multiple input files with custom names
+        
+        Args:
+            input_files: Dictionary mapping desired filenames to Path objects
+        """
+        for filename, file_path in input_files.items():
+            self.handle_input_file(file_path, custom_filename=filename)
 
     def get_file_extension(self, input_file: Path) -> str:
         file_extension = os.path.splitext(input_file)[1].lower()
@@ -115,6 +130,28 @@ class Predictor(BasePredictor):
                     )
         return file_extension
 
+    def substitute_workflow_params(self, workflow: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+        """Substitute parameters in workflow JSON
+        
+        Allows dynamic parameter substitution in workflows using placeholder syntax.
+        Example: {"inputs": {"text": "{{prompt}}"}} with params={"prompt": "a cat"}
+        
+        Args:
+            workflow: The workflow dictionary
+            params: Dictionary of parameter names to values
+            
+        Returns:
+            Modified workflow with substituted parameters
+        """
+        workflow_str = json.dumps(workflow)
+        
+        for key, value in params.items():
+            # Support both {{key}} and {key} placeholder syntax
+            workflow_str = workflow_str.replace(f"{{{{{key}}}}}", str(value))
+            workflow_str = workflow_str.replace(f"{{{key}}}", str(value))
+        
+        return json.loads(workflow_str)
+
     def predict(
         self,
         workflow_json: str = Input(
@@ -124,6 +161,30 @@ class Predictor(BasePredictor):
         input_file: Optional[Path] = Input(
             description="Input image, video, tar or zip file. Read guidance on workflows and input files here: https://github.com/replicate/cog-comfyui. Alternatively, you can replace inputs with URLs in your JSON workflow and the model will download them.",
             default=None,
+        ),
+        input_file_2: Optional[Path] = Input(
+            description="Optional second input file (image, video, etc.)",
+            default=None,
+        ),
+        input_file_3: Optional[Path] = Input(
+            description="Optional third input file (image, video, etc.)",
+            default=None,
+        ),
+        input_filename_1: str = Input(
+            description="Custom filename for input_file (e.g., 'image.png', 'video.mp4'). If not specified, defaults to 'input' with appropriate extension.",
+            default="",
+        ),
+        input_filename_2: str = Input(
+            description="Custom filename for input_file_2",
+            default="",
+        ),
+        input_filename_3: str = Input(
+            description="Custom filename for input_file_3",
+            default="",
+        ),
+        workflow_params: str = Input(
+            description="JSON string of parameters to substitute in workflow. Use {{param_name}} in your workflow JSON, then pass {\"param_name\": \"value\"} here.",
+            default="",
         ),
         return_temp_files: bool = Input(
             description="Return any temporary files, such as preprocessed controlnet images. Useful for debugging.",
@@ -139,12 +200,25 @@ class Predictor(BasePredictor):
             description="Force reset the ComfyUI cache before running the workflow. Useful for debugging.",
             default=False,
         ),
+        skip_weight_check: bool = Input(
+            description="Skip checking if weights are in the supported manifest. Use this to run workflows with custom/arbitrary models. Note: You must provide the model files via the 'weights' parameter in setup or ensure they exist in ComfyUI/models.",
+            default=False,
+        ),
+        skip_node_checks: bool = Input(
+            description="Skip checks for unsupported nodes. Use this to run workflows with nodes that are flagged as unsupported by helper modules.",
+            default=False,
+        ),
     ) -> List[Path]:
         """Run a single prediction on the model"""
         self.comfyUI.cleanup(ALL_DIRECTORIES)
 
+        # Handle multiple input files with custom filenames
         if input_file:
-            self.handle_input_file(input_file)
+            self.handle_input_file(input_file, custom_filename=input_filename_1 or None)
+        if input_file_2:
+            self.handle_input_file(input_file_2, custom_filename=input_filename_2 or None)
+        if input_file_3:
+            self.handle_input_file(input_file_3, custom_filename=input_filename_3 or None)
 
         workflow_json_content = workflow_json
         if workflow_json.startswith("data:") and ";base64," in workflow_json:
@@ -162,7 +236,20 @@ class Predictor(BasePredictor):
             except requests.exceptions.RequestException as e:
                 raise ValueError(f"Failed to download workflow JSON from URL: {e}")
 
-        wf = self.comfyUI.load_workflow(workflow_json_content or EXAMPLE_WORKFLOW_JSON)
+        wf = self.comfyUI.load_workflow(
+            workflow_json_content or EXAMPLE_WORKFLOW_JSON,
+            skip_weight_check=skip_weight_check,
+            skip_node_checks=skip_node_checks,
+        )
+        
+        # Apply parameter substitution if provided
+        if workflow_params:
+            try:
+                params_dict = json.loads(workflow_params)
+                wf = self.substitute_workflow_params(wf, params_dict)
+                print(f"Applied workflow parameter substitutions: {list(params_dict.keys())}")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid workflow_params JSON: {e}")
 
         self.comfyUI.connect()
 
