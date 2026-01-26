@@ -46,7 +46,7 @@ timm
 importlib_metadata
 opencv-python-headless>=4.0.1.24
 filelock
-numpy>=1.25.0
+numpy>=1.25.0,<2.0.0
 scikit-image
 python-dateutil
 mediapipe
