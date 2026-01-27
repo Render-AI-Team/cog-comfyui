@@ -4,6 +4,7 @@ import tarfile
 import zipfile
 import mimetypes
 import json
+import sys
 from PIL import Image
 from typing import List, Optional, Dict, Any
 from cog import BasePredictor, Input, Path
@@ -44,7 +45,7 @@ class Predictor(BasePredictor):
         os.makedirs(os.environ.get("YOLO_CONFIG_DIR", "/tmp/Ultralytics"), exist_ok=True)
 
         self.comfyUI = ComfyUI("127.0.0.1:8188")
-        self.comfyUI.start_server(OUTPUT_DIR, INPUT_DIR)
+        self.server_started = False
 
     def handle_user_weights(self, weights: str):
         if hasattr(weights, "url"):
@@ -152,10 +153,51 @@ class Predictor(BasePredictor):
         
         return json.loads(workflow_str)
 
+    def _resolve_workflow_source(self, workflow_content: str) -> str:
+        """Resolve workflow content from inline JSON, data URI, or URL."""
+        if not workflow_content:
+            return ""
+        if workflow_content.startswith("data:") and ";base64," in workflow_content:
+            base64_part = workflow_content.split(",", 1)[1]
+            decoded_bytes = base64.b64decode(base64_part)
+            return decoded_bytes.decode("utf-8")
+        if workflow_content.startswith(("http://", "https://")):
+            response = requests.get(workflow_content)
+            response.raise_for_status()
+            return response.text
+        return workflow_content
+
+    def _convert_ui_workflow(self, workflow_json_content: str) -> Dict[str, Any]:
+        """Convert UI-format workflow JSON to API format using the upstream converter."""
+        comfy_path = os.path.abspath("ComfyUI")
+        if comfy_path not in sys.path:
+            sys.path.append(comfy_path)
+
+        try:
+            from workflow_converter import WorkflowConverter
+        except ImportError as e:
+            raise ImportError(
+                "Workflow converter is unavailable. Ensure workflow_converter.py is present and ComfyUI modules are importable."
+            ) from e
+
+        try:
+            ui_workflow = json.loads(workflow_json_content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid UI workflow JSON: {e}")
+
+        try:
+            return WorkflowConverter.convert_to_api(ui_workflow)
+        except Exception as e:
+            raise RuntimeError(f"Failed to convert UI workflow to API format: {e}")
+
     def predict(
         self,
         workflow_json: str = Input(
             description="Your ComfyUI workflow as JSON string or URL. You must use the API version of your workflow. Get it from ComfyUI using 'Save (API format)'. Instructions here: https://github.com/replicate/cog-comfyui",
+            default="",
+        ),
+        ui_workflow_json: str = Input(
+            description="Optional: your ComfyUI workflow saved in the UI format (string or URL). It will be auto-converted to API format using the official converter before execution.",
             default="",
         ),
         input_file: Optional[Path] = Input(
@@ -202,11 +244,19 @@ class Predictor(BasePredictor):
         ),
         skip_weight_check: bool = Input(
             description="Skip checking if weights are in the supported manifest. Use this to run workflows with custom/arbitrary models. Note: You must provide the model files via the 'weights' parameter in setup or ensure they exist in ComfyUI/models.",
-            default=False,
+            default=True,
         ),
         skip_node_checks: bool = Input(
             description="Skip checks for unsupported nodes. Use this to run workflows with nodes that are flagged as unsupported by helper modules.",
+            default=True,
+        ),
+        install_custom_nodes: bool = Input(
+            description="Install custom nodes declared in the workflow before running (and remove them after). Increases startup time.",
             default=False,
+        ),
+        node_to_repo_map: str = Input(
+            description="JSON mapping of node class names to git repo URLs, e.g., {\"ManualSigmas\": \"https://github.com/example/repo\"}. Overrides default class map for specified nodes.",
+            default="",
         ),
     ) -> List[Path]:
         """Run a single prediction on the model"""
@@ -221,23 +271,47 @@ class Predictor(BasePredictor):
             self.handle_input_file(input_file_3, custom_filename=input_filename_3 or None)
 
         workflow_json_content = workflow_json
-        if workflow_json.startswith("data:") and ";base64," in workflow_json:
-            try:
-                base64_part = workflow_json.split(",", 1)[1]
-                decoded_bytes = base64.b64decode(base64_part)
-                workflow_json_content = decoded_bytes.decode("utf-8")
-            except Exception as e:
-                raise ValueError(f"Failed to decode base64 workflow JSON: {e}")
-        elif workflow_json.startswith(("http://", "https://")):
-            try:
-                response = requests.get(workflow_json)
-                response.raise_for_status()
-                workflow_json_content = response.text
-            except requests.exceptions.RequestException as e:
-                raise ValueError(f"Failed to download workflow JSON from URL: {e}")
+        ui_workflow_json_content = ui_workflow_json
+
+        try:
+            workflow_json_content = self._resolve_workflow_source(workflow_json_content)
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Failed to download workflow JSON from URL: {e}")
+        except Exception as e:
+            raise ValueError(f"Failed to decode workflow JSON: {e}")
+
+        try:
+            ui_workflow_json_content = self._resolve_workflow_source(ui_workflow_json_content)
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Failed to download UI workflow JSON from URL: {e}")
+        except Exception as e:
+            raise ValueError(f"Failed to decode UI workflow JSON: {e}")
+
+        wf_source = workflow_json_content or EXAMPLE_WORKFLOW_JSON
+        if ui_workflow_json_content:
+            wf_source = self._convert_ui_workflow(ui_workflow_json_content)
+
+        # Always check for and install missing custom nodes from workflow
+        # Start fresh server when nodes are needed for this workflow
+        if install_custom_nodes or not self.server_started:
+            # Stop old server if it exists
+            if self.server_started:
+                self.comfyUI.stop_server()
+                self.comfyUI.cleanup_custom_nodes()
+            
+            # Auto-detect and install missing nodes from workflow
+            user_node_map = {}
+            if node_to_repo_map:
+                try:
+                    user_node_map = json.loads(node_to_repo_map)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid node_to_repo_map JSON: {e}")
+            self.comfyUI.install_custom_nodes_for_workflow(wf_source, user_node_map=user_node_map)
+            self.comfyUI.start_server(OUTPUT_DIR, INPUT_DIR)
+            self.server_started = True
 
         wf = self.comfyUI.load_workflow(
-            workflow_json_content or EXAMPLE_WORKFLOW_JSON,
+            wf_source,
             skip_weight_check=skip_weight_check,
             skip_node_checks=skip_node_checks,
         )
@@ -259,13 +333,22 @@ class Predictor(BasePredictor):
         if randomise_seeds:
             self.comfyUI.randomise_seeds(wf)
 
-        self.comfyUI.run_workflow(wf)
+        history_output = self.comfyUI.run_workflow(wf)
 
         output_directories = [OUTPUT_DIR]
         if return_temp_files:
             output_directories.append(COMFYUI_TEMP_OUTPUT_DIR)
 
+        # Use history-based file extraction for robust output detection
+        output_files = self.comfyUI.extract_files_from_history(history_output, output_directories)
         optimised_files = optimise_images.optimise_image_files(
-            output_format, output_quality, self.comfyUI.get_files(output_directories)
+            output_format, output_quality, output_files
         )
-        return [Path(p) for p in optimised_files]
+
+        if install_custom_nodes:
+            # Clean up any custom nodes cloned for this run and stop server to release them
+            self.comfyUI.stop_server()
+            self.comfyUI.cleanup_custom_nodes()
+            self.server_started = False
+
+        return optimised_files

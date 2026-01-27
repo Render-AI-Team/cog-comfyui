@@ -628,7 +628,7 @@ class ComfyUI:
         self.wait_for_prompt_completion(workflow, prompt_id)
         output_json = self.get_history(prompt_id)
         print("outputs: ", output_json)
-        print("====================================")
+        print("====================================\")
         return output_json
 
     def get_history(self, prompt_id):
@@ -641,8 +641,8 @@ class ComfyUI:
     def extract_files_from_history(self, history_output, output_directories):
         """
         Extract file paths from ComfyUI history output.
-        Dynamically parses all output types from the history metadata to find all generated files.
-        Handles images, videos, audio, and any custom output types from extensions.
+        Parses the structured output metadata to find all generated files.
+        Supports images, videos, audio, gifs and any custom output types.
         Falls back to directory walking if history parsing fails.
         """
         files = []
@@ -654,27 +654,24 @@ class ComfyUI:
             output_directories = [output_directories]
         
         # Parse history output to find all output files
-        # ComfyUI outputs are organized by node_id -> output_type -> [items]
+        # ComfyUI outputs are organized by node_id -> output_type -> items
         for node_id, node_output in history_output.items():
-            # Dynamically check ALL keys in node_output (not just hardcoded types)
-            # This catches custom outputs from extensions
-            for output_type, output_data in node_output.items():
-                # Output data should be a list of items
-                if isinstance(output_data, list):
-                    for item in output_data:
-                        # Each item should be a dict with filename and optional subfolder
+            # Check all possible output types
+            for output_type in ["images", "videos", "audio", "gifs", "masks", "depth", "latent"]:
+                if output_type in node_output:
+                    for item in node_output[output_type]:
                         if isinstance(item, dict) and "filename" in item:
                             filename = item["filename"]
                             subfolder = item.get("subfolder", "")
-                            # Try to locate file in any output directory
+                            # Construct full path
                             for output_dir in output_directories:
                                 full_path = os.path.join(output_dir, subfolder, filename)
                                 if os.path.exists(full_path):
-                                    print(f"Found {output_type} file from history: {full_path}")
+                                    print(f"Found output file from history: {full_path}")
                                     files.append(Path(full_path))
                                     break
         
-        # If no files found via history, fall back to directory walk as safety net
+        # If no files found via history, fall back to directory walk
         if not files:
             print("No files found in history output, falling back to directory walk")
             return self.get_files(output_directories)
