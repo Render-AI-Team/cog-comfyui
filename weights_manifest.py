@@ -7,7 +7,9 @@ from config import config
 
 USER_WEIGHTS_MANIFEST_PATH = config["USER_WEIGHTS_MANIFEST_PATH"]
 REMOTE_WEIGHTS_MANIFEST_URL = config["REMOTE_WEIGHTS_MANIFEST_URL"]
-REMOTE_WEIGHTS_MANIFEST_PATH = "updated_weights.json"
+# Store remote manifest in cache directory to keep repo clean
+DOWNLOADED_MANIFESTS_PATH = config["DOWNLOADED_MANIFESTS_PATH"]
+REMOTE_WEIGHTS_MANIFEST_PATH = os.path.join(DOWNLOADED_MANIFESTS_PATH, "updated_weights.json")
 WEIGHTS_MANIFEST_PATH = "weights.json"
 WEIGHTS_SYNONYMS_PATH = "weight_synonyms.json"
 BASE_URL = config["WEIGHTS_BASE_URL"]
@@ -33,6 +35,9 @@ class WeightsManifest:
         return self._merge_manifests()
 
     def _download_updated_weights_manifest(self):
+        # Ensure cache directory exists
+        os.makedirs(DOWNLOADED_MANIFESTS_PATH, exist_ok=True)
+        
         if not os.path.exists(REMOTE_WEIGHTS_MANIFEST_PATH):
             print(
                 f"Downloading updated weights manifest from {REMOTE_WEIGHTS_MANIFEST_URL}"

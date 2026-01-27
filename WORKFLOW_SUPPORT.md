@@ -1,5 +1,18 @@
 # Workflow Support & Build-Time Preloading
 
+## Quick Start
+
+To analyze and prepare your workflows defined in `workflows.json`:
+
+```bash
+python preload_workflows_build.py
+```
+
+This will:
+- Scan all workflows in `workflows.json`
+- Detect required custom nodes and model files
+- Report which dependencies are available vs. need to be provided
+
 ## Overview
 
 The `cog build` command now includes a build-time preload step that analyzes all workflows defined in `workflows.json` and prepares the environment for them.
@@ -85,12 +98,15 @@ cog predict \
 
 ## Configuration
 
-The preload script is configured in `cog.yaml`:
+The preload script is available in the repository root:
 
-```yaml
-build:
-  run:
-    - python preload_workflows_build.py || exit 1
+```bash
+# Run the analysis locally (before building)
+python preload_workflows_build.py
+
+# Or after installing dependencies
+python3 -m pip install -r requirements.txt
+python preload_workflows_build.py
 ```
 
 To modify preload behavior, edit `preload_workflows_build.py`:
@@ -98,11 +114,13 @@ To modify preload behavior, edit `preload_workflows_build.py`:
 - `extract_nodes_from_workflow()`: Node type extraction
 - `preload_all_workflows()`: Main preload orchestration
 
+**Note**: The preload script is optional and non-blocking. If it's not run before `cog build`, everything will still work - custom nodes will just be auto-installed at runtime instead of being detected upfront.
+
 ## Files
 
-- **`preload_workflows_build.py`**: Build-time preload script
-- **`workflows.json`**: Workflow definitions to be preloaded
+- **`preload_workflows_build.py`**: Workflow analysis script (run manually or in your build pipeline)
+- **`workflows.json`**: Workflow definitions to be analyzed
 - **`custom_node_class_map.json`**: Maps node classes to repositories
 - **`custom_nodes.json`**: List of supported custom node repos
-- **`cog.yaml`**: Build configuration including preload step
+- **`cog.yaml`**: Build configuration
 

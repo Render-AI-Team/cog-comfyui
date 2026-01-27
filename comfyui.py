@@ -129,7 +129,204 @@ class ComfyUI:
             if callable(method):
                 method(*args, **kwargs)
 
-    def handle_weights(self, workflow, weights_to_download=None, skip_check=False):
+    def extract_weights_from_multiple_workflows(self, workflows_data):
+        """Extract weights from multiple workflows (array or object format).
+        
+        Args:
+            workflows_data: Either a list of workflows or a dict of name->workflow mappings
+            
+        Returns:
+            Set of all unique weights across all workflows
+        """
+        all_weights = set()
+        
+        if isinstance(workflows_data, list):
+            for item in workflows_data:
+                if isinstance(item, dict):
+                    # Check if item has a "workflow" key or if it IS a workflow
+                    if "workflow" in item:
+                        weights = self.extract_required_weights(item["workflow"])
+                    else:
+                        weights = self.extract_required_weights(item)
+                    all_weights.update(weights)
+        elif isinstance(workflows_data, dict):
+            if "workflows" in workflows_data:
+                # Explicitly named workflows list
+                for item in workflows_data["workflows"]:
+                    if isinstance(item, dict):
+                        if "workflow" in item:
+                            weights = self.extract_required_weights(item["workflow"])
+                        else:
+                            weights = self.extract_required_weights(item)
+                        all_weights.update(weights)
+            else:
+                # Object with named workflows
+                for name, workflow in workflows_data.items():
+                    if isinstance(workflow, dict) and not name.startswith("_"):
+                        weights = self.extract_required_weights(workflow)
+                        all_weights.update(weights)
+        
+        return all_weights
+
+    def extract_required_weights(self, workflow):
+        """Extract all weight/model file requirements from a workflow.
+        
+        Returns a list of all model files that the workflow needs.
+        This is used for preloading weights during setup.
+        """
+        required_weights = []
+        supported_extensions = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".onnx")
+        
+        for node in workflow.values():
+            class_type = node.get("class_type")
+            inputs = node.get("inputs", {})
+            
+            # Checkpoint loaders
+            if class_type in ["CheckpointLoaderSimple", "CheckpointLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader"]:
+                ckpt_name = inputs.get("ckpt_name")
+                if ckpt_name and ckpt_name.endswith(supported_extensions):
+                    required_weights.append(ckpt_name)
+            
+            # Split-model loaders
+            elif class_type == "UNETLoader":
+                unet_name = inputs.get("unet_name")
+                if unet_name and unet_name.endswith(supported_extensions):
+                    required_weights.append(unet_name)
+            
+            elif class_type == "CLIPLoader":
+                clip_name = inputs.get("clip_name")
+                if clip_name and clip_name.endswith(supported_extensions):
+                    required_weights.append(clip_name)
+            
+            elif class_type == "DualCLIPLoader":
+                for key in ["clip_name1", "clip_name2"]:
+                    clip_name = inputs.get(key)
+                    if clip_name and clip_name.endswith(supported_extensions):
+                        required_weights.append(clip_name)
+            
+            elif class_type == "TripleCLIPLoader":
+                for key in ["clip_name1", "clip_name2", "clip_name3"]:
+                    clip_name = inputs.get(key)
+                    if clip_name and clip_name.endswith(supported_extensions):
+                        required_weights.append(clip_name)
+            
+            elif class_type == "QuadrupleCLIPLoader":
+                for key in ["clip_name1", "clip_name2", "clip_name3", "clip_name4"]:
+                    clip_name = inputs.get(key)
+                    if clip_name and clip_name.endswith(supported_extensions):
+                        required_weights.append(clip_name)
+            
+            elif class_type == "VAELoader":
+                vae_name = inputs.get("vae_name")
+                if vae_name and vae_name.endswith(supported_extensions):
+                    required_weights.append(vae_name)
+            
+            elif class_type in ["ControlNetLoader", "DiffControlNetLoader"]:
+                control_net_name = inputs.get("control_net_name")
+                if control_net_name and control_net_name.endswith(supported_extensions):
+                    required_weights.append(control_net_name)
+            
+            elif class_type == "CLIPVisionLoader":
+                clip_name = inputs.get("clip_name")
+                if clip_name and clip_name.endswith(supported_extensions):
+                    required_weights.append(clip_name)
+            
+            elif class_type == "StyleModelLoader":
+                style_model_name = inputs.get("style_model_name")
+                if style_model_name and style_model_name.endswith(supported_extensions):
+                    required_weights.append(style_model_name)
+            
+            elif class_type == "GLIGENLoader":
+                gligen_name = inputs.get("gligen_name")
+                if gligen_name and gligen_name.endswith(supported_extensions):
+                    required_weights.append(gligen_name)
+            
+            elif class_type == "UpscaleModelLoader":
+                model_name = inputs.get("model_name")
+                if model_name and model_name.endswith(supported_extensions):
+                    required_weights.append(model_name)
+            
+            elif class_type == "HypernetworkLoader":
+                hypernetwork_name = inputs.get("hypernetwork_name")
+                if hypernetwork_name and hypernetwork_name.endswith(supported_extensions):
+                    required_weights.append(hypernetwork_name)
+            
+            elif class_type in ["LoraLoader", "LoraLoaderModelOnly"]:
+                lora_name = inputs.get("lora_name")
+                if lora_name and lora_name.endswith(supported_extensions):
+                    required_weights.append(lora_name)
+        
+        # Return unique list of weights
+        return list(set(required_weights))
+
+    def validate_weights_from_multiple_workflows(self, workflows_data, skip_check=False):
+        """Validate weights exist for multiple workflows.
+        
+        Returns tuple of (all_exist: bool, missing_weights: list)
+        """
+        if skip_check:
+            return True, []
+        
+        required_weights = self.extract_weights_from_multiple_workflows(workflows_data)
+        missing_weights = []
+        
+        for weight in required_weights:
+            weight_canonical = self.weights_downloader.get_canonical_weight_str(weight)
+            if weight_canonical in self.weights_downloader.weights_map:
+                dest_info = self.weights_downloader.weights_map[weight_canonical]
+                if isinstance(dest_info, list):
+                    exists = any(
+                        self.weights_downloader.check_if_file_exists(weight_canonical, d["dest"])
+                        for d in dest_info
+                    )
+                else:
+                    exists = self.weights_downloader.check_if_file_exists(
+                        weight_canonical, dest_info["dest"]
+                    )
+                
+                if not exists:
+                    missing_weights.append(weight_canonical)
+            else:
+                missing_weights.append(weight)
+        
+        return len(missing_weights) == 0, missing_weights
+
+    def validate_weights_exist(self, workflow, skip_check=False):
+        """Validate that all required weights exist locally.
+        
+        Returns tuple of (all_exist: bool, missing_weights: list)
+        This is a fast check that doesn't download anything.
+        """
+        if skip_check:
+            return True, []
+        
+        required_weights = self.extract_required_weights(workflow)
+        missing_weights = []
+        
+        for weight in required_weights:
+            weight_canonical = self.weights_downloader.get_canonical_weight_str(weight)
+            if weight_canonical in self.weights_downloader.weights_map:
+                dest_info = self.weights_downloader.weights_map[weight_canonical]
+                if isinstance(dest_info, list):
+                    # Check if any of the destinations have the file
+                    exists = any(
+                        self.weights_downloader.check_if_file_exists(weight_canonical, d["dest"])
+                        for d in dest_info
+                    )
+                else:
+                    exists = self.weights_downloader.check_if_file_exists(
+                        weight_canonical, dest_info["dest"]
+                    )
+                
+                if not exists:
+                    missing_weights.append(weight_canonical)
+            else:
+                # Weight not in manifest - might be a custom weight
+                missing_weights.append(weight)
+        
+        return len(missing_weights) == 0, missing_weights
+
+    def handle_weights(self, workflow, weights_to_download=None, skip_check=False, download_all_model_inputs=False):
         if weights_to_download is None:
             weights_to_download = []
 
@@ -138,21 +335,132 @@ class ComfyUI:
         # Always normalize LoraLoader URL nodes so they still function when skipping checks
         self.convert_lora_loader_nodes(workflow)
 
-        # Always download checkpoints - they're validated by ComfyUI and must exist
-        checkpoints_to_download = []
+        # Always download model files - they're validated by ComfyUI and must exist
+        models_to_download = []
         for node in workflow.values():
-            if node.get("class_type") in ["CheckpointLoaderSimple", "CheckpointLoader", "unCLIPCheckpointLoader"]:
-                ckpt_name = node.get("inputs", {}).get("ckpt_name")
+            class_type = node.get("class_type")
+            inputs = node.get("inputs", {})
+            
+            # Checkpoint loaders
+            if class_type in ["CheckpointLoaderSimple", "CheckpointLoader", "unCLIPCheckpointLoader", "ImageOnlyCheckpointLoader"]:
+                ckpt_name = inputs.get("ckpt_name")
                 if ckpt_name and ckpt_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
-                    checkpoints_to_download.append(ckpt_name)
+                    models_to_download.append(ckpt_name)
+            
+            # Split-model loaders (Flux, SD3, Mochi, Wan, etc.)
+            elif class_type == "UNETLoader":
+                unet_name = inputs.get("unet_name")
+                if unet_name and unet_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(unet_name)
+            
+            elif class_type == "CLIPLoader":
+                clip_name = inputs.get("clip_name")
+                if clip_name and clip_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(clip_name)
+            
+            elif class_type == "DualCLIPLoader":
+                for key in ["clip_name1", "clip_name2"]:
+                    clip_name = inputs.get(key)
+                    if clip_name and clip_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                        models_to_download.append(clip_name)
+            
+            elif class_type == "TripleCLIPLoader":
+                for key in ["clip_name1", "clip_name2", "clip_name3"]:
+                    clip_name = inputs.get(key)
+                    if clip_name and clip_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                        models_to_download.append(clip_name)
+            
+            elif class_type == "QuadrupleCLIPLoader":
+                for key in ["clip_name1", "clip_name2", "clip_name3", "clip_name4"]:
+                    clip_name = inputs.get(key)
+                    if clip_name and clip_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                        models_to_download.append(clip_name)
+            
+            elif class_type == "VAELoader":
+                vae_name = inputs.get("vae_name")
+                if vae_name and vae_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(vae_name)
+            
+            # ControlNet loaders
+            elif class_type in ["ControlNetLoader", "DiffControlNetLoader"]:
+                control_net_name = inputs.get("control_net_name")
+                if control_net_name and control_net_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(control_net_name)
+            
+            # Other model loaders
+            elif class_type == "CLIPVisionLoader":
+                clip_name = inputs.get("clip_name")
+                if clip_name and clip_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(clip_name)
+            
+            elif class_type == "StyleModelLoader":
+                style_model_name = inputs.get("style_model_name")
+                if style_model_name and style_model_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(style_model_name)
+            
+            elif class_type == "GLIGENLoader":
+                gligen_name = inputs.get("gligen_name")
+                if gligen_name and gligen_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(gligen_name)
+            
+            elif class_type == "UpscaleModelLoader":
+                model_name = inputs.get("model_name")
+                if model_name and model_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(model_name)
+            
+            elif class_type == "HypernetworkLoader":
+                hypernetwork_name = inputs.get("hypernetwork_name")
+                if hypernetwork_name and hypernetwork_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(hypernetwork_name)
+
+            # LoRA loaders (ensure LoRAs also download automatically)
+            elif class_type in ["LoraLoader", "LoraLoaderModelOnly"]:
+                lora_name = inputs.get("lora_name")
+                if lora_name and lora_name.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    models_to_download.append(lora_name)
         
-        if checkpoints_to_download:
-            print(f"Downloading {len(checkpoints_to_download)} checkpoint(s) (always required for validation)")
-            for ckpt in set(checkpoints_to_download):
-                self.weights_downloader.download_weights(ckpt)
+        if models_to_download:
+            print(f"Downloading {len(models_to_download)} model file(s) (always required for validation)")
+            for model in set(models_to_download):
+                self.weights_downloader.download_weights(model)
 
         if skip_check:
             print("⚠️  Skipping additional weight checks (LoRAs, embeddings, etc.)")
+            # If download_all_model_inputs is enabled, still scan for and download any model files
+            if download_all_model_inputs:
+                print("✓ download_all_model_inputs enabled: scanning workflow for all model file inputs...")
+                weights_to_download = []
+                embeddings = self.weights_downloader.get_weights_by_type("EMBEDDINGS")
+                embedding_to_fullname = {emb.split(".")[0]: emb for emb in embeddings}
+                weights_filetypes = self.weights_downloader.supported_filetypes
+                
+                for node in workflow.values():
+                    if node.get("class_type") in ["HFHubLoraLoader", "LoraLoaderFromURL"]:
+                        continue
+                    
+                    for input_key, input_value in node.get("inputs", {}).items():
+                        if isinstance(input_value, str):
+                            # Check for embeddings by name
+                            if any(key in input_value for key in embedding_to_fullname):
+                                weights_to_download.extend(
+                                    embedding_to_fullname[key]
+                                    for key in embedding_to_fullname
+                                    if key in input_value
+                                )
+                            # Check for any model file by extension
+                            elif any(input_value.endswith(ft) for ft in weights_filetypes):
+                                weight_str = self.weights_downloader.get_canonical_weight_str(input_value)
+                                if weight_str != input_value:
+                                    print(f"Converting model synonym {input_value} to {weight_str}")
+                                    node["inputs"][input_key] = weight_str
+                                weights_to_download.append(weight_str)
+                
+                weights_to_download = list(set(weights_to_download))
+                if weights_to_download:
+                    print(f"Downloading {len(weights_to_download)} additional file(s) (embeddings, custom inputs, etc.)")
+                    for weight in weights_to_download:
+                        self.weights_downloader.download_weights(weight)
+            
             print("=====================================")
             return
             
@@ -584,7 +892,7 @@ class ComfyUI:
             else:
                 continue
 
-    def load_workflow(self, workflow, skip_weight_check=False, skip_node_checks=False):
+    def load_workflow(self, workflow, skip_weight_check=False, skip_node_checks=False, download_all_model_inputs=False):
         if not isinstance(workflow, dict):
             wf = json.loads(workflow)
         else:
@@ -600,7 +908,7 @@ class ComfyUI:
         if not skip_node_checks:
             self.handle_known_unsupported_nodes(wf)
         self.handle_inputs(wf)
-        self.handle_weights(wf, skip_check=skip_weight_check)
+        self.handle_weights(wf, skip_check=skip_weight_check, download_all_model_inputs=download_all_model_inputs)
         return wf
 
     def reset_execution_cache(self):

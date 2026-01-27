@@ -1,0 +1,56 @@
+{
+  "flux_schnell": {
+    "1": {
+      "inputs": {
+        "ckpt_name": "flux1-schnell.safetensors"
+      },
+      "class_type": "CheckpointLoaderSimple"
+    },
+    "2": {
+      "inputs": {
+        "clip_name": "clip_l.safetensors"
+      },
+      "class_type": "CLIPLoader"
+    },
+    "3": {
+      "inputs": {
+        "vae_name": "ae.safetensors"
+      },
+      "class_type": "VAELoader"
+    }
+  },
+  "flux_dev": {
+    "1": {
+      "inputs": {
+        "ckpt_name": "flux1-dev.safetensors"
+      },
+      "class_type": "CheckpointLoaderSimple"
+    },
+    "2": {
+      "inputs": {
+        "clip_name": "clip_l.safetensors"
+      },
+      "class_type": "CLIPLoader"
+    },
+    "3": {
+      "inputs": {
+        "vae_name": "ae.safetensors"
+      },
+      "class_type": "VAELoader"
+    }
+  },
+  "sdxl_base": {
+    "1": {
+      "inputs": {
+        "ckpt_name": "sd_xl_base_1.0.safetensors"
+      },
+      "class_type": "CheckpointLoaderSimple"
+    },
+    "2": {
+      "inputs": {
+        "ckpt_name": "sd_xl_refiner_1.0.safetensors"
+      },
+      "class_type": "CheckpointLoaderSimple"
+    }
+  }
+}

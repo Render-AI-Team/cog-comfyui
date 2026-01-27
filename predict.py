@@ -37,6 +37,20 @@ with open("examples/api_workflows/birefnet_api.json", "r") as file:
 
 class Predictor(BasePredictor):
     def setup(self, weights: str):
+        """Setup the predictor with optional weight preloading.
+        
+        To preload weights, set environment variables:
+        - PRELOAD_WORKFLOW: Path or URL to single workflow JSON
+        - PRELOAD_WORKFLOWS: Path or URL to workflows.json file (multiple workflows)
+        - BASE_MODEL_KIT: One of 'sd15', 'sdxl', 'flux', or 'none' (default)
+        
+        Supports auto-detection:
+        - If workflows.json exists in root directory, it will be auto-loaded
+        
+        All downloaded weights, workflows, and manifests are stored in temporary
+        cache directories (.cache/, .downloads/, .temp_workflows/) which are
+        excluded from git via .gitignore.
+        """
         if bool(weights):
             self.handle_user_weights(weights)
 
@@ -44,8 +58,189 @@ class Predictor(BasePredictor):
             os.makedirs(directory, exist_ok=True)
         os.makedirs(os.environ.get("YOLO_CONFIG_DIR", "/tmp/Ultralytics"), exist_ok=True)
 
+        # Create cache directories for downloaded workflows and manifests
+        os.makedirs(config["DOWNLOADED_WORKFLOWS_PATH"], exist_ok=True)
+        os.makedirs(config["DOWNLOADED_MANIFESTS_PATH"], exist_ok=True)
+        os.makedirs(config["USER_WEIGHTS_PATH"], exist_ok=True)
+
+        # Preload base model kit if specified via environment variable
+        base_model_kit = os.environ.get("BASE_MODEL_KIT", "none")
+        if base_model_kit != "none":
+            self.preload_base_kit(base_model_kit)
+        
+        # Preload workflows from file (supports multiple workflows)
+        # Priority: env var > auto-detect workflows.json > single workflow env var
+        preload_workflows = os.environ.get("PRELOAD_WORKFLOWS", "")
+        if preload_workflows:
+            self.preload_all_workflows(preload_workflows)
+        elif os.path.exists("workflows.json"):
+            print("📄 Found workflows.json, auto-loading...")
+            self.preload_all_workflows("workflows.json")
+        else:
+            # Fall back to single workflow if multiple not specified
+            preload_workflow = os.environ.get("PRELOAD_WORKFLOW", "")
+            if preload_workflow:
+                self.preload_workflow_weights(preload_workflow)
+
         self.comfyUI = ComfyUI("127.0.0.1:8188")
         self.server_started = False
+
+    def preload_base_kit(self, kit_name: str):
+        """Preload common model sets during setup."""
+        from weights_downloader import WeightsDownloader
+        downloader = WeightsDownloader()
+        
+        kit_models = {
+            "sd15": [
+                "v1-5-pruned-emaonly.safetensors",
+            ],
+            "sdxl": [
+                "sd_xl_base_1.0.safetensors",
+                "sd_xl_refiner_1.0.safetensors",
+            ],
+            "flux": [
+                "flux1-dev.safetensors",
+                "clip_l.safetensors",
+                "t5xxl_fp8_e4m3fn.safetensors",
+                "ae.safetensors",
+            ],
+        }
+        
+        models = kit_models.get(kit_name, [])
+        if models:
+            print(f"⏳ Preloading {kit_name} base kit ({len(models)} models)...")
+            for model in models:
+                try:
+                    downloader.download_weights(model)
+                except Exception as e:
+                    print(f"⚠️  Failed to preload {model}: {e}")
+            print(f"✅ Base kit '{kit_name}' preloaded")
+    
+    def preload_workflow_weights(self, workflow_json: str):
+        """Preload all weights required by a workflow during setup."""
+        print("⏳ Preloading workflow weights...")
+        try:
+            # Resolve workflow source (URL, data URI, or inline JSON)
+            workflow_content = self._resolve_workflow_source(workflow_json)
+            workflow = json.loads(workflow_content)
+            
+            # Extract required weights from workflow
+            required_weights = self.comfyUI.extract_required_weights(workflow)
+            
+            if required_weights:
+                print(f"Found {len(required_weights)} weight(s) to preload")
+                for weight in required_weights:
+                    self.comfyUI.weights_downloader.download_weights(weight)
+                print("✅ Workflow weights preloaded")
+            else:
+                print("ℹ️  No weights found in workflow")
+        except Exception as e:
+            print(f"⚠️  Failed to preload workflow weights: {e}")
+            print("Continuing with setup...")
+    
+    def preload_all_workflows(self, workflows_file: str):
+        """Preload weights for all workflows in a workflows.json file.
+        
+        Supports multiple formats:
+        1. Array of workflows: [{"name": "flux", "workflow": {...}}, ...]
+        2. Object with named workflows: {"flux": {...}, "sdxl": {...}}
+        3. File paths: {"workflow_name": "path/to/workflow.json", ...}
+        4. Mixed: {"name1": {...workflow...}, "name2": "path/to/workflow.json"}
+        """
+        print("⏳ Preloading weights from all workflows...")
+        try:
+            # Resolve workflow source
+            workflows_content = self._resolve_workflow_source(workflows_file)
+            workflows_data = json.loads(workflows_content)
+            
+            all_weights = set()
+            workflow_count = 0
+            
+            # Handle both array and object formats
+            if isinstance(workflows_data, list):
+                # Array format: [{"name": "...", "workflow": {...}}, ...]
+                for item in workflows_data:
+                    if isinstance(item, dict) and "workflow" in item:
+                        workflow_count += 1
+                        name = item.get("name", f"workflow_{workflow_count}")
+                        workflow = item["workflow"]
+                        weights = self.comfyUI.extract_required_weights(workflow)
+                        print(f"  📄 {name}: {len(weights)} weight(s)")
+                        all_weights.update(weights)
+                    elif isinstance(item, dict):
+                        # Treat the item itself as a workflow
+                        workflow_count += 1
+                        weights = self.comfyUI.extract_required_weights(item)
+                        print(f"  📄 workflow_{workflow_count}: {len(weights)} weight(s)")
+                        all_weights.update(weights)
+            
+            elif isinstance(workflows_data, dict):
+                # Object format: {"flux": {...}, "sdxl": {...}}
+                # Check if it's a workflows collection or a single workflow
+                if "workflows" in workflows_data:
+                    # Explicitly named "workflows" key
+                    for item in workflows_data["workflows"]:
+                        if isinstance(item, dict) and "workflow" in item:
+                            workflow_count += 1
+                            name = item.get("name", f"workflow_{workflow_count}")
+                            workflow = item["workflow"]
+                        else:
+                            workflow = item
+                            workflow_count += 1
+                            name = f"workflow_{workflow_count}"
+                        weights = self.comfyUI.extract_required_weights(workflow)
+                        print(f"  📄 {name}: {len(weights)} weight(s)")
+                        all_weights.update(weights)
+                else:
+                    # Assume keys are workflow names, values can be workflows or file paths
+                    for name, workflow_or_path in workflows_data.items():
+                        # Skip metadata keys
+                        if name.startswith("_") or name in ["metadata", "config", "settings"]:
+                            continue
+                        
+                        workflow_count += 1
+                        
+                        # Check if value is a file path (string)
+                        if isinstance(workflow_or_path, str):
+                            print(f"  📁 Loading {name} from: {workflow_or_path}")
+                            try:
+                                workflow_content = self._resolve_workflow_source(workflow_or_path)
+                                workflow = json.loads(workflow_content)
+                            except Exception as e:
+                                print(f"  ⚠️  Failed to load workflow from {workflow_or_path}: {e}")
+                                continue
+                        elif isinstance(workflow_or_path, dict):
+                            workflow = workflow_or_path
+                        else:
+                            print(f"  ⚠️  Skipping {name}: invalid format")
+                            continue
+                        
+                        weights = self.comfyUI.extract_required_weights(workflow)
+                        print(f"  📄 {name}: {len(weights)} weight(s)")
+                        all_weights.update(weights)
+            
+            if all_weights:
+                all_weights = list(all_weights)
+                print(f"\nFound {len(all_weights)} unique weight(s) across {workflow_count} workflow(s)")
+                print(f"⏳ Downloading {len(all_weights)} weight(s)...")
+                
+                for i, weight in enumerate(all_weights, 1):
+                    try:
+                        print(f"  [{i}/{len(all_weights)}] {weight}...", end=" ", flush=True)
+                        self.comfyUI.weights_downloader.download_weights(weight)
+                        print("✅")
+                    except Exception as e:
+                        print(f"❌ {e}")
+                
+                print(f"\n✅ All workflows preloaded")
+            else:
+                print(f"ℹ️  No weights found in {workflow_count} workflow(s)")
+        
+        except Exception as e:
+            print(f"⚠️  Failed to preload workflows: {e}")
+            import traceback
+            traceback.print_exc()
+            print("Continuing with setup...")
 
     def handle_user_weights(self, weights: str):
         if hasattr(weights, "url"):
@@ -130,6 +325,22 @@ class Predictor(BasePredictor):
                         f"Unable to determine file type for: {input_file}, {e}"
                     )
         return file_extension
+
+    def cleanup_input_files(self):
+        """Clean up input files after successful output generation"""
+        if os.path.exists(INPUT_DIR):
+            print(f"🧹 Cleaning up input files from {INPUT_DIR}")
+            for filename in os.listdir(INPUT_DIR):
+                file_path = os.path.join(INPUT_DIR, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                        print(f"  ✓ Deleted: {filename}")
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                        print(f"  ✓ Deleted directory: {filename}")
+                except Exception as e:
+                    print(f"  ✗ Failed to delete {filename}: {e}")
 
     def substitute_workflow_params(self, workflow: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
         """Substitute parameters in workflow JSON
@@ -258,6 +469,10 @@ class Predictor(BasePredictor):
             description="JSON mapping of node class names to git repo URLs, e.g., {\"ManualSigmas\": \"https://github.com/example/repo\"}. Overrides default class map for specified nodes.",
             default="",
         ),
+        download_all_model_inputs: bool = Input(
+            description="Download all detected model files from workflow inputs, including embeddings and custom-node files. Ensures 100% coverage even with skip_weight_check enabled.",
+            default=False,
+        ),
     ) -> List[Path]:
         """Run a single prediction on the model"""
         self.comfyUI.cleanup(ALL_DIRECTORIES)
@@ -314,6 +529,7 @@ class Predictor(BasePredictor):
             wf_source,
             skip_weight_check=skip_weight_check,
             skip_node_checks=skip_node_checks,
+            download_all_model_inputs=download_all_model_inputs,
         )
         
         # Apply parameter substitution if provided
@@ -344,6 +560,9 @@ class Predictor(BasePredictor):
         optimised_files = optimise_images.optimise_image_files(
             output_format, output_quality, output_files
         )
+
+        # Clean up input files after successful output generation
+        self.cleanup_input_files()
 
         if install_custom_nodes:
             # Clean up any custom nodes cloned for this run and stop server to release them

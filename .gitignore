@@ -18,3 +18,19 @@ downloaded_user_models/
 .cog
 run_default_workflows.log
 .DS_Store
+# Temporary cache directories for all dynamically installed content
+# Manifests, workflows, models, nodes, loras, etc.
+.cache/
+.downloads/
+.temp_workflows/
+
+# ComfyUI auto-downloaded and dynamically installed content
+ComfyUI/models/                  # Model weights (auto-downloaded)
+ComfyUI/custom_nodes/            # Dynamically installed custom nodes
+ComfyUI/input/                   # Input images/data
+ComfyUI/output/                  # Generated outputs
+ComfyUI/temp/                    # Temporary files
+
+# LoRAs and other dynamic additions
+loras/
+embeddings/

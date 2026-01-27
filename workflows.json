@@ -1,0 +1,20 @@
+{
+  "ltx2_first_last_frame_guide": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - First Last Frame (guide node).json",
+  "ltx2_first_last_frame_inplace": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - First Last Frame (in-place node).json",
+  "ltx2_first_middle_last_frame": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - First Middle Last Frame (guide node).json",
+  "ltx2_i2v_basic_gguf": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V Basic (GGUF).json",
+  "ltx2_i2v_basic_custom_audio": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V Basic (custom audio).json",
+  "ltx2_i2v_basic": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V Basic.json",
+  "ltx2_i2v_ic_control_pose": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V IC-Control (pose).json",
+  "ltx2_i2v_simple_no_upscale": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V Simple (no upscale).json",
+  "ltx2_i2v_talking_avatar": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V Talking Avatar (voice clone Qwen-TTS).json",
+  "ltx2_i2v_t2v_beta_sampler": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V and T2V (beta test sampler previews).json",
+  "ltx2_i2v_t2v_ic_control_all": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - I2V and T2V IC-Control (All-In-One Pose Canny Depth).json",
+  "ltx2_t2v_basic_gguf": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - T2V Basic (GGUF).json",
+  "ltx2_t2v_basic_custom_audio": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - T2V Basic (custom audio).json",
+  "ltx2_t2v_basic_low_vram": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - T2V Basic (low vram).json",
+  "ltx2_t2v_basic": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - T2V Basic.json",
+  "ltx2_t2v_talking_avatar": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - T2V Talking Avatar (voice clone Qwen-TTS).json",
+  "ltx2_v2a_foley": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - V2A Foley (add sound to any video).json",
+  "ltx2_v2v_extend": "examples/ui_workflows/RuneXX/LTX-2-Workflows/LTX-2 - V2V (extend any video).json"
+}
