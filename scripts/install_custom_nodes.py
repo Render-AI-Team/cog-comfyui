@@ -3,12 +3,18 @@
 import json
 import os
 import subprocess
+from pathlib import Path
 
 """
 This script is used to clone specific versions of repositories.
 It reads a JSON file containing repositories and their commit hashes, clones them into a specific directory,
 and then checks out to the specified commit.
 """
+
+# Resolve to project root (parent of scripts directory)
+script_dir = Path(__file__).parent
+project_root = script_dir.parent
+os.chdir(project_root)
 
 json_file = "custom_nodes.json"
 comfy_dir = "ComfyUI"

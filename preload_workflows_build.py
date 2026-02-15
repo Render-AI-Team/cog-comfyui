@@ -12,7 +12,13 @@ at runtime via the weights parameter or skip_weight_check flag.
 import json
 import sys
 import os
+import shutil
 from pathlib import Path
+
+# Ensure we run from project root
+script_file = Path(__file__).resolve()
+project_root = script_file.parent
+os.chdir(project_root)
 
 
 def load_workflows_json(path="workflows.json"):
@@ -126,6 +132,124 @@ def extract_nodes_from_workflow(workflow: dict) -> set:
         print(f"  Warning: Error extracting nodes: {e}")
     
     return nodes
+
+
+def get_available_disk_space(path=".") -> int:
+    """Get available disk space in bytes for the given path."""
+    try:
+        stat = shutil.disk_usage(path)
+        return stat.free
+    except Exception as e:
+        print(f"⚠️  Could not determine disk space: {e}")
+        return -1
+
+
+def estimate_weight_sizes(weights: set) -> dict:
+    """Estimate sizes of weights based on common model sizes.
+    
+    Returns dict with:
+    - 'total_bytes': Total estimated size
+    - 'total_gb': Total size in GB
+    - 'estimates': Dict of weight -> estimated size in GB
+    """
+    # Common weight file sizes (in GB)
+    weight_size_estimates = {
+        # FLUX models
+        "flux1-dev.safetensors": 24.0,
+        "flux1-schnell.safetensors": 12.0,
+        "clip_l.safetensors": 0.75,
+        "t5xxl_fp8_e4m3fn.safetensors": 5.0,
+        "ae.safetensors": 0.32,
+        
+        # Stable Diffusion models
+        "sd_xl_base_1.0.safetensors": 6.94,
+        "sd_xl_refiner_1.0.safetensors": 6.94,
+        "v1-5-pruned-emaonly.safetensors": 4.2,
+        
+        # LTX models (often custom/not in manifest, estimate conservatively)
+        "LTX-2": 10.0,
+        "LTX-2-Foley": 2.0,
+        "LTX-2-IC-Control": 1.5,
+        "LTX2/LTX2IV": 10.0,
+    }
+    
+    estimates = {}
+    total_bytes = 0
+    
+    for weight in sorted(weights):
+        # Check if we have a specific estimate
+        estimated_gb = weight_size_estimates.get(weight)
+        
+        if estimated_gb is None:
+            # Try to find partial matches
+            for known_weight, size_gb in weight_size_estimates.items():
+                if known_weight.lower() in weight.lower() or weight.lower() in known_weight.lower():
+                    estimated_gb = size_gb
+                    break
+        
+        # Default estimate for unknown weights
+        if estimated_gb is None:
+            if "foley" in weight.lower() or "audio" in weight.lower():
+                estimated_gb = 2.0
+            elif "control" in weight.lower():
+                estimated_gb = 1.5
+            elif "vae" in weight.lower() or "clip" in weight.lower():
+                estimated_gb = 0.5
+            else:
+                # Conservative estimate for unknown models
+                estimated_gb = 5.0
+        
+        estimates[weight] = estimated_gb
+        total_bytes += int(estimated_gb * 1024 * 1024 * 1024)
+    
+    total_gb = total_bytes / (1024 * 1024 * 1024)
+    
+    return {
+        "total_bytes": total_bytes,
+        "total_gb": round(total_gb, 2),
+        "estimates": {w: round(sz, 2) for w, sz in estimates.items()}
+    }
+
+
+def check_disk_space(required_bytes: int) -> bool:
+    """Check if there's enough disk space for weights.
+    
+    Returns True if there's enough space, False otherwise.
+    """
+    available_bytes = get_available_disk_space()
+    
+    if available_bytes < 0:
+        print("⚠️  Could not determine available disk space")
+        return True  # Assume OK if we can't check
+    
+    available_gb = available_bytes / (1024 * 1024 * 1024)
+    required_gb = required_bytes / (1024 * 1024 * 1024)
+    
+    print(f"\n{'='*60}")
+    print(f"💾 Disk Space Check")
+    print(f"{'='*60}")
+    print(f"Available space: {available_gb:.2f} GB")
+    print(f"Required space:  {required_gb:.2f} GB")
+    print(f"Safety margin:   10 GB (recommended)")
+    
+    # Check if we have enough space (with 10GB safety margin)
+    required_with_margin = required_bytes + (10 * 1024 * 1024 * 1024)
+    
+    if available_bytes >= required_with_margin:
+        print(f"✅ Sufficient disk space available")
+        print(f"{'='*60}\n")
+        return True
+    elif available_bytes >= required_bytes:
+        print(f"⚠️  Warning: Limited disk space (no safety margin)")
+        print(f"   Available: {available_gb:.2f} GB, Required: {required_gb:.2f} GB")
+        print(f"{'='*60}\n")
+        return True
+    else:
+        print(f"❌ Insufficient disk space!")
+        print(f"   Need: {required_gb:.2f} GB, Have: {available_gb:.2f} GB")
+        print(f"   Shortage: {(required_bytes - available_bytes) / (1024 * 1024 * 1024):.2f} GB")
+        print(f"{'='*60}\n")
+        return False
 
 
 def preload_all_workflows():
@@ -248,6 +372,27 @@ def preload_all_workflows():
     if not has_downloader:
         print(f"\n⚠️  Skipping weight download (dependencies not fully installed)")
         return 0
+    
+    # Check disk space before downloading
+    size_estimates = estimate_weight_sizes(all_weights)
+    total_required_bytes = size_estimates["total_bytes"]
+    total_required_gb = size_estimates["total_gb"]
+    
+    # Show weight size estimates
+    print(f"\n{'='*60}")
+    print(f"📊 Weight Size Estimates")
+    print(f"{'='*60}")
+    for weight, size_gb in list(size_estimates["estimates"].items())[:10]:
+        print(f"  {weight}: {size_gb} GB")
+    if len(size_estimates["estimates"]) > 10:
+        print(f"  ... and {len(size_estimates['estimates']) - 10} more weights")
+    print(f"\nTotal estimated size: {total_required_gb} GB")
+    print(f"{'='*60}\n")
+    
+    # Check if we have enough disk space
+    if not check_disk_space(total_required_bytes):
+        print(f"⛔ Aborting: Insufficient disk space to download weights")
+        return 1
     
     # Download all unique weights
     all_weights = sorted(list(all_weights))

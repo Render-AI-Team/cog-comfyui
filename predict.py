@@ -15,6 +15,14 @@ from config import config
 import requests
 import base64
 
+# Import workflow dependency installer for automatic setup
+try:
+    from workflow_dependency_installer import main as install_workflow_dependencies
+    HAS_DEPENDENCY_INSTALLER = True
+except ImportError:
+    HAS_DEPENDENCY_INSTALLER = False
+    print("⚠️  Workflow dependency installer not available - will skip automatic setup")
+
 
 os.environ["DOWNLOAD_LATEST_WEIGHTS_MANIFEST"] = "true"
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -50,6 +58,9 @@ class Predictor(BasePredictor):
         All downloaded weights, workflows, and manifests are stored in temporary
         cache directories (.cache/, .downloads/, .temp_workflows/) which are
         excluded from git via .gitignore.
+        
+        Dependencies (custom nodes, models) are automatically installed from
+        detected workflows using the workflow dependency installer.
         """
         if bool(weights):
             self.handle_user_weights(weights)
@@ -63,6 +74,32 @@ class Predictor(BasePredictor):
         os.makedirs(config["DOWNLOADED_MANIFESTS_PATH"], exist_ok=True)
         os.makedirs(config["USER_WEIGHTS_PATH"], exist_ok=True)
 
+        # Check if workflows will be preloaded and auto-install dependencies if so
+        # This must happen BEFORE ComfyUI initialization so all custom nodes are available
+        has_workflows = False
+        preload_workflows = os.environ.get("PRELOAD_WORKFLOWS", "")
+        preload_workflow = os.environ.get("PRELOAD_WORKFLOW", "")
+        has_workflows_json = os.path.exists("workflows.json")
+        
+        if preload_workflows or preload_workflow or has_workflows_json:
+            has_workflows = True
+            
+        if has_workflows and HAS_DEPENDENCY_INSTALLER:
+            print("\n🔧 Auto-installing workflow dependencies...")
+            print("=" * 60)
+            try:
+                # Run the workflow dependency installer
+                # It will detect custom nodes and models from workflows.json and install them
+                install_workflow_dependencies()
+                print("=" * 60)
+                print("✅ Workflow dependencies installed successfully\n")
+            except Exception as e:
+                print("=" * 60)
+                print(f"⚠️  Workflow dependency installation failed: {e}")
+                print("⚠️  Continuing with setup (this may cause issues if dependencies were required)")
+                import traceback
+                traceback.print_exc()
+
         # Preload base model kit if specified via environment variable
         base_model_kit = os.environ.get("BASE_MODEL_KIT", "none")
         if base_model_kit != "none":
@@ -70,15 +107,13 @@ class Predictor(BasePredictor):
         
         # Preload workflows from file (supports multiple workflows)
         # Priority: env var > auto-detect workflows.json > single workflow env var
-        preload_workflows = os.environ.get("PRELOAD_WORKFLOWS", "")
         if preload_workflows:
             self.preload_all_workflows(preload_workflows)
-        elif os.path.exists("workflows.json"):
+        elif has_workflows_json:
             print("📄 Found workflows.json, auto-loading...")
             self.preload_all_workflows("workflows.json")
         else:
             # Fall back to single workflow if multiple not specified
-            preload_workflow = os.environ.get("PRELOAD_WORKFLOW", "")
             if preload_workflow:
                 self.preload_workflow_weights(preload_workflow)
 

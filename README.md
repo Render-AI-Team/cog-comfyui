@@ -213,16 +213,35 @@ After running the training, you'll have your own ComfyUI model with your customi
 Clone this repository:
 
 ```sh
-git clone --recurse-submodules https://github.com/replicate/cog-comfyui.git
+git clone --recurse-submodules https://github.com/renderai-team/cog-comfyui.git
 ```
 
-Run the [following script](https://github.com/replicate/cog-comfyui/blob/main/scripts/install_custom_nodes.py) to install all the custom nodes:
+Build the container with Cog:
 
 ```sh
-./scripts/install_custom_nodes.py
+cog build
 ```
 
-You can view the list of nodes in [custom_nodes.json](https://github.com/replicate/cog-comfyui/blob/main/custom_nodes.json)
+This will automatically:
+- Install all custom nodes from [custom_nodes.json](https://github.com/replicate/cog-comfyui/blob/main/custom_nodes.json)
+- Preload all weights, LoRAs, and dependencies defined in `workflows.json` (if present)
+
+### Installing Dependencies for Custom Workflows
+
+If you have custom workflows not covered by the default setup, use the Workflow Dependency Installer to automatically download required custom nodes and weights **directly from the workflows themselves** - no weights.json manifest required!
+
+```sh
+# Install dependencies for a single workflow
+python workflow_dependency_installer.py path/to/your/workflow.json
+
+# Install dependencies for multiple workflows
+python workflow_dependency_installer.py workflow1.json workflow2.json
+
+# Install dependencies for inline JSON
+python workflow_dependency_installer.py '{"nodes": [...], "links": [...]}'
+```
+
+This tool analyzes your workflows and installs all required dependencies, making it easy to containerize arbitrary ComfyUI workflows. See [WORKFLOW_DEPENDENCY_INSTALLER.md](WORKFLOW_DEPENDENCY_INSTALLER.md) for detailed usage.
 
 ### Running the Web UI from your Cog container
 

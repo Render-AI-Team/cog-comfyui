@@ -178,6 +178,7 @@
 - clip_g_hidream.safetensors
 - clip_l_hidream.safetensors
 - gemma_2_2b_fp16.safetensors
+- gemma_3_12B_it_fp8_scaled.safetensors
 - llama_3.1_8b_instruct_fp8_scaled.safetensors
 - llava_llama3_fp16.safetensors
 - llava_llama3_fp8_scaled.safetensors
@@ -191,6 +192,8 @@
 - clip_g.safetensors
 - clip_l.safetensors
 - EVA02_CLIP_L_336_psz14_s6B.pt
+- ltx-2-19b-embeddings_connector_dev_bf16.safetensors
+- ltx-2-19b-embeddings_connector_distill_bf16.safetensors
 - models--QuanSun--EVA-CLIP
 - sd15/model.fp16.safetensors
 - sd15/model.safetensors
